@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GTD Horizon Tree</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<style>
+  :root{
+    --bg:#fff; --fg:#1f2328; --line:#c4c9d0; --hl:#e5484d; --lbl:#666; --panel:#f6f7f9;
+    --k-value:#7c3aed; --k-vision:#4f46e5; --k-goal:#2563eb; --k-project:#0d9488; --k-task:#475569; --k-unfiled:#9ca3af;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#191b1f; --fg:#e6e6e6; --line:#454b52; --hl:#ff6369; --lbl:#9aa0a6; --panel:#23262b;
+      --k-value:#a78bfa; --k-vision:#818cf8; --k-goal:#60a5fa; --k-project:#2dd4bf; --k-task:#94a3b8; --k-unfiled:#6b7280; }
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; font:13px/1.4 system-ui,sans-serif; color:var(--fg); background:var(--bg); overflow:hidden; }
+  #bar{ position:fixed; top:0; left:0; right:0; height:38px; z-index:10; display:flex; align-items:center; gap:8px;
+    padding:0 10px; background:var(--panel); border-bottom:1px solid var(--line); }
+  #bar button{ font:inherit; padding:3px 8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; cursor:pointer; }
+  #crumb{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--lbl); }
+  #crumb b{ color:var(--fg); }
+  #viewport{ position:fixed; top:38px; left:0; right:0; bottom:0; overflow:hidden; cursor:grab; }
+  #viewport.drag{ cursor:grabbing; }
+  #pan{ position:absolute; transform-origin:0 0; padding:24px; }
+
+  /* org chart */
+  .chart, .chart ul{ list-style:none; margin:0; padding:0; }
+  .chart, .chart ul{ display:flex; padding-top:22px; position:relative; }
+  .chart{ padding-top:0; align-items:flex-start; gap:28px; }
+  .chart li{ position:relative; padding:22px 10px 0; text-align:center; }
+  /* connectors */
+  .chart li::before, .chart li::after{ content:''; position:absolute; top:0; right:50%; width:50%; height:22px;
+    border-top:2px solid var(--line); }
+  .chart li::after{ right:auto; left:50%; border-left:2px solid var(--line); }
+  .chart li:only-child{ padding-top:22px; }
+  .chart li:only-child::before, .chart li:only-child::after{ display:none; }
+  .chart > li:only-child{ padding-top:0; }
+  .chart li:first-child::before, .chart li:last-child::after{ border:0 none; }
+  .chart li:last-child::before{ border-right:2px solid var(--line); border-radius:0 6px 0 0; }
+  .chart li:first-child::after{ border-radius:6px 0 0 0; }
+  .chart ul::before{ content:''; position:absolute; top:0; left:50%; width:0; height:22px; border-left:2px solid var(--line); }
+  .chart > li::before, .chart > li::after{ display:none; }
+  .chart > li > ul::before{ } /* top-level roots have no incoming line */
+
+  .node{ display:inline-flex; flex-direction:column; align-items:center; gap:2px; min-width:120px; max-width:220px;
+    padding:6px 10px; border:1.5px solid var(--k); border-top-width:4px; border-radius:8px; background:var(--bg);
+    cursor:pointer; position:relative; }
+  .node .kind{ font-size:9px; letter-spacing:.05em; text-transform:uppercase; color:var(--k); font-weight:700; }
+  .node .label{ font-weight:600; word-break:break-word; }
+  .node .sub{ display:flex; gap:5px; flex-wrap:wrap; justify-content:center; margin-top:2px; }
+  .chip{ font-size:10px; padding:1px 6px; border-radius:10px; background:var(--panel); color:var(--lbl); }
+  .chip.area{ background:color-mix(in srgb, var(--k-project) 22%, transparent); color:var(--k-project); }
+  .caret{ position:absolute; top:-9px; left:50%; transform:translateX(-50%); width:16px; height:16px; line-height:14px;
+    border:1px solid var(--line); border-radius:50%; background:var(--bg); font-size:11px; text-align:center; z-index:2; }
+  .k-value{ --k:var(--k-value) } .k-vision{ --k:var(--k-vision) } .k-goal{ --k:var(--k-goal) }
+  .k-project{ --k:var(--k-project) } .k-task{ --k:var(--k-task) } .k-unfiled{ --k:var(--k-unfiled) }
+
+  li.collapsed > ul{ display:none; }
+  li.collapsed > .node .caret{ }
+  /* ancestry highlight */
+  .chart.dim .node{ opacity:.4; }
+  .chart.dim li.onpath > .node{ opacity:1; }
+  li.onpath > .node{ box-shadow:0 0 0 2px var(--hl); }
+  .chart.dim li.onpath::before, .chart.dim li.onpath::after{ border-color:var(--hl); }
+  .chart.dim li.onpath > ul::before{ border-color:var(--hl); }
+
+  /* task status chip colors */
+  .st{ font-size:10px; padding:1px 6px; border-radius:10px; color:#fff; }
+  .st-inbox{background:#8b8f96}.st-todo{background:#3b82f6}.st-inprogress{background:#f59e0b}
+  .st-waiting{background:#a855f7}.st-someday{background:#6b7280}.st-done{background:#22c55e}
+  #empty{ padding:40px; color:var(--lbl); }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="fit">Fit</button><button id="zin">＋</button><button id="zout">－</button>
+  <button id="expand">Expand all</button><button id="collapse">Collapse tasks</button>
+  <button id="clear">Clear trace</button>
+  <span id="crumb">Click any node to trace it up to its root Value.</span>
+  <button id="refresh">↻</button>
+</div>
+<div id="viewport"><div id="pan"><ul class="chart" id="chart"><li><div id="empty">Loading…</div></li></ul></div></div>
+<script>
+const esc = s => String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+const toRows = c => { const k=Object.keys(c), n=(c.id||[]).length, o=[]; for(let i=0;i<n;i++){const r={}; for(const x of k)r[x]=c[x][i]; o.push(r);} return o; };
+const stCls = s => ({ "Inbox":"st-inbox","To Do":"st-todo","In Progress":"st-inprogress","Waiting For":"st-waiting","Someday/Maybe":"st-someday","Done":"st-done" }[s]||"st-todo");
+
+grist.ready({ requiredAccess: 'full' });
+grist.onRecords(() => load());
+
+async function load(){
+  let values,vision,goals,areas,projects,tasks;
+  try{
+    [values,vision,goals,areas,projects,tasks] = await Promise.all(
+      ['Values','Vision','Goals','Areas','Projects','Tasks'].map(t=>grist.docApi.fetchTable(t).then(toRows)));
+  }catch(e){ document.getElementById('chart').innerHTML='<li><div id="empty">Could not read tables: '+esc(e.message||e)+'</div></li>'; return; }
+
+  const areaName = id => (areas.find(a=>a.id===id)||{}).Name || null;
+  const childTasksOf={}, rootTasksByProject={};
+  for(const t of tasks){ if(t.Parent)(childTasksOf[t.Parent] ||= []).push(t); else (rootTasksByProject[t.Project||0] ||= []).push(t); }
+  const buildTask = t => ({ id:t.id, label:t.Title, kind:"Task", status:t.Status, badge:null,
+    children:(childTasksOf[t.id]||[]).sort((a,b)=>(a.Title||'').localeCompare(b.Title||'')).map(buildTask) });
+  const projByGoal={}; for(const p of projects)(projByGoal[p.Goal||0] ||= []).push(p);
+  const buildProject = p => ({ id:p.id, label:p.Name, kind:"Project", badge:p.Area?areaName(p.Area):null,
+    children:(rootTasksByProject[p.id]||[]).sort((a,b)=>(a.Title||'').localeCompare(b.Title||'')).map(buildTask) });
+  const buildGoal = g => ({ id:g.id, label:g.Name, kind:"Goal", children:(projByGoal[g.id]||[]).map(buildProject) });
+  const goalsByVision={}, goalsByValue={};
+  for(const g of goals){ if(g.Vision)(goalsByVision[g.Vision] ||= []).push(g); else (goalsByValue[g.Value||0] ||= []).push(g); }
+  const visionByValue={}; for(const v of vision)(visionByValue[v.Value||0] ||= []).push(v);
+  const buildVision = v => ({ id:v.id, label:v.Name, kind:"Vision", children:(goalsByVision[v.id]||[]).map(buildGoal) });
+  const buildValue = val => ({ id:val.id, label:val.Name, kind:"Value",
+    children:[ ...(visionByValue[val.id]||[]).map(buildVision), ...(goalsByValue[val.id]||[]).map(buildGoal) ] });
+
+  const roots = values.map(buildValue);
+  const unfiledProjects = (projByGoal[0]||[]).map(buildProject);
+  const unfiledTasks = (rootTasksByProject[0]||[]).map(buildTask);
+  if(unfiledProjects.length) roots.push({ id:'up', label:'Unfiled Projects', kind:'Unfiled', children:unfiledProjects });
+  if(unfiledTasks.length) roots.push({ id:'ut', label:'Unfiled Tasks', kind:'Unfiled', children:unfiledTasks });
+
+  render(roots);
+}
+
+function nodeEl(node){
+  const li=document.createElement('li'); li.className='tnode'; li.dataset.label=`${node.label}`; li.dataset.kind=node.kind;
+  const box=document.createElement('div'); box.className='node k-'+node.kind.toLowerCase();
+  let sub='';
+  if(node.kind==='Task' && node.status) sub+=`<span class="st ${stCls(node.status)}">${esc(node.status)}</span>`;
+  if(node.badge) sub+=`<span class="chip area">${esc(node.badge)}</span>`;
+  box.innerHTML=`<span class="kind">${node.kind}</span><span class="label">${esc(node.label)}</span>`+(sub?`<span class="sub">${sub}</span>`:'');
+  if(node.children && node.children.length){
+    const caret=document.createElement('span'); caret.className='caret'; caret.textContent='–';
+    caret.onclick=e=>{ e.stopPropagation(); li.classList.toggle('collapsed'); caret.textContent=li.classList.contains('collapsed')?'+':'–'; };
+    box.appendChild(caret);
+  }
+  box.onclick=()=>trace(li);
+  li.appendChild(box);
+  if(node.children && node.children.length){
+    const ul=document.createElement('ul'); node.children.forEach(c=>ul.appendChild(nodeEl(c))); li.appendChild(ul);
+  }
+  return li;
+}
+
+function render(roots){
+  const chart=document.getElementById('chart'); chart.className='chart'; chart.innerHTML='';
+  if(!roots.length){ chart.innerHTML='<li><div id="empty">No Values yet — add one to grow the tree.</div></li>'; return; }
+  roots.forEach(r=>chart.appendChild(nodeEl(r)));
+  fit();
+}
+
+function trace(li){
+  const chart=document.getElementById('chart');
+  chart.querySelectorAll('.onpath').forEach(e=>e.classList.remove('onpath'));
+  const crumbs=[]; let cur=li;
+  while(cur && cur.classList && cur.classList.contains('tnode')){
+    cur.classList.add('onpath'); crumbs.unshift(cur.dataset.label);
+    const ul=cur.parentElement; const p=ul&&ul.parentElement; cur=(p&&p.classList&&p.classList.contains('tnode'))?p:null;
+  }
+  chart.classList.add('dim');
+  document.getElementById('crumb').innerHTML = crumbs.map((c,i)=>i===crumbs.length-1?`<b>${esc(c)}</b>`:esc(c)).join('  ›  ');
+}
+function clearTrace(){ const chart=document.getElementById('chart'); chart.classList.remove('dim');
+  chart.querySelectorAll('.onpath').forEach(e=>e.classList.remove('onpath'));
+  document.getElementById('crumb').textContent='Click any node to trace it up to its root Value.'; }
+
+/* pan + zoom */
+let scale=1, tx=24, ty=24, dragging=false, sx=0, sy=0;
+const pan=document.getElementById('pan'), vp=document.getElementById('viewport');
+function apply(){ pan.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`; }
+vp.addEventListener('mousedown',e=>{ if(e.target.closest('.node'))return; dragging=true; vp.classList.add('drag'); sx=e.clientX-tx; sy=e.clientY-ty; });
+window.addEventListener('mouseup',()=>{ dragging=false; vp.classList.remove('drag'); });
+window.addEventListener('mousemove',e=>{ if(dragging){ tx=e.clientX-sx; ty=e.clientY-sy; apply(); } });
+vp.addEventListener('wheel',e=>{ e.preventDefault(); const r=vp.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
+  const d=e.deltaY<0?1.1:1/1.1; const ns=Math.min(2.5,Math.max(0.15,scale*d));
+  tx=mx-(mx-tx)*(ns/scale); ty=my-(my-ty)*(ns/scale); scale=ns; apply(); },{passive:false});
+function fit(){ const chart=document.getElementById('chart'); const r=chart.getBoundingClientRect(); const vr=vp.getBoundingClientRect();
+  const cw=chart.scrollWidth||r.width, ch=chart.scrollHeight||r.height;
+  scale=Math.min(1, Math.min((vr.width-40)/cw,(vr.height-40)/ch)||1); if(!isFinite(scale)||scale<=0)scale=1;
+  tx=Math.max(24,(vr.width-cw*scale)/2); ty=24; apply(); }
+
+document.getElementById('fit').onclick=fit;
+document.getElementById('zin').onclick=()=>{ scale=Math.min(2.5,scale*1.15); apply(); };
+document.getElementById('zout').onclick=()=>{ scale=Math.max(0.15,scale/1.15); apply(); };
+document.getElementById('clear').onclick=clearTrace;
+document.getElementById('refresh').onclick=load;
+document.getElementById('expand').onclick=()=>document.querySelectorAll('.collapsed').forEach(li=>{ li.classList.remove('collapsed'); const c=li.querySelector(':scope>.node>.caret'); if(c)c.textContent='–'; });
+document.getElementById('collapse').onclick=()=>document.querySelectorAll('li.tnode').forEach(li=>{ if(li.dataset.kind==='Project'||li.dataset.kind==='Unfiled'){ const hasTaskChild=li.querySelector(':scope>ul>li'); if(hasTaskChild){ li.classList.add('collapsed'); const c=li.querySelector(':scope>.node>.caret'); if(c)c.textContent='+'; } } });
+load();
+</script>
+</body>
+</html>
