@@ -8,14 +8,14 @@
   :root{
     --bg:#fff; --fg:#1f2328; --line:#c4c9d0; --edge:#b3b9c2; --hl:#e5484d; --lbl:#6b7280; --panel:#f6f7f9;
     --k-value:#7c3aed; --k-vision:#4f46e5; --k-goal:#2563eb; --k-project:#0d9488; --k-task:#475569; --k-bucket:#9ca3af;
-    --divider:rgba(15,23,42,.20);
-    --band0:rgba(124,58,237,.11); --band1:rgba(79,70,229,.10); --band2:rgba(37,99,235,.10); --band3:rgba(13,148,136,.11); --band4:rgba(71,85,105,.07);
+    --divider:rgba(15,23,42,.30);
+    --band0:rgba(124,58,237,.14); --band1:rgba(79,70,229,.13); --band2:rgba(37,99,235,.13); --band3:rgba(13,148,136,.14); --band4:rgba(71,85,105,.09);
   }
   @media (prefers-color-scheme: dark){
     :root{ --bg:#191b1f; --fg:#e6e6e6; --line:#454b52; --edge:#525963; --hl:#ff6369; --lbl:#9aa0a6; --panel:#23262b;
       --k-value:#a78bfa; --k-vision:#818cf8; --k-goal:#60a5fa; --k-project:#2dd4bf; --k-task:#94a3b8; --k-bucket:#6b7280;
-      --divider:rgba(255,255,255,.20);
-      --band0:rgba(167,139,250,.15); --band1:rgba(129,140,248,.14); --band2:rgba(96,165,250,.13); --band3:rgba(45,212,191,.13); --band4:rgba(148,163,184,.10); }
+      --divider:rgba(255,255,255,.34);
+      --band0:rgba(167,139,250,.22); --band1:rgba(129,140,248,.19); --band2:rgba(96,165,250,.17); --band3:rgba(45,212,191,.17); --band4:rgba(148,163,184,.12); }
   }
   *{ box-sizing:border-box; }
   html,body{ margin:0; height:100%; font:13px/1.4 system-ui,sans-serif; color:var(--fg); background:var(--bg); overflow:hidden; }
@@ -30,10 +30,10 @@
   #bands{ position:absolute; left:0; top:0; z-index:0; }
   .band{ position:absolute; left:0; }
   .band .fill{ position:absolute; inset:0; }
-  .band .divider{ position:absolute; left:0; right:0; top:0; border-top:2px solid var(--divider); }
-  .band .blabel{ position:absolute; left:0; top:0; bottom:0; width:78px; display:flex; align-items:center; justify-content:center;
-    writing-mode:vertical-rl; transform:rotate(180deg); font-size:13px; font-weight:800; letter-spacing:.14em;
-    text-transform:uppercase; color:var(--k); opacity:.85; border-right:1px solid var(--divider); }
+  .band .divider{ position:absolute; left:0; right:0; top:0; border-top:3px solid var(--divider); }
+  .band .blabel{ position:absolute; left:0; top:0; bottom:0; width:84px; display:flex; align-items:center; justify-content:center;
+    writing-mode:vertical-rl; transform:rotate(180deg); font-size:15px; font-weight:800; letter-spacing:.2em;
+    text-transform:uppercase; color:#fff; background:var(--k); }
   .band0 .blabel{--k:var(--k-value)} .band1 .blabel{--k:var(--k-vision)} .band2 .blabel{--k:var(--k-goal)}
   .band3 .blabel{--k:var(--k-project)} .band4 .blabel{--k:var(--k-task)}
   #edges{ position:absolute; left:0; top:0; z-index:1; pointer-events:none; overflow:visible; }
