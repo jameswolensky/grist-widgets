@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Next Actions</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<style>
+  :root{ --bg:#fff; --fg:#1f2328; --line:#d7dbe0; --lbl:#6b7280; --panel:#f6f7f9; --accent:#2563eb;
+    --hi:#e5484d; --med:#f59e0b; --lo:#6b7280; }
+  @media (prefers-color-scheme: dark){ :root{ --bg:#191b1f; --fg:#e6e6e6; --line:#3a3f45; --lbl:#9aa0a6; --panel:#23262b; --accent:#60a5fa; } }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font:13px/1.45 system-ui,sans-serif; color:var(--fg); background:var(--bg); }
+  #bar{ position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding:8px 12px; background:var(--panel); border-bottom:1px solid var(--line); }
+  #bar label{ color:var(--lbl); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  #bar select{ font:inherit; padding:3px 6px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+  #count{ margin-left:auto; color:var(--lbl); }
+  #list{ padding:6px 0; }
+  .row{ display:flex; align-items:center; gap:12px; padding:9px 14px; border-bottom:1px solid var(--line); }
+  .rank{ width:22px; text-align:right; color:var(--lbl); font-variant-numeric:tabular-nums; }
+  .main{ flex:1; min-width:0; }
+  .title{ font-weight:600; }
+  .meta{ color:var(--lbl); font-size:11.5px; margin-top:2px; display:flex; gap:8px; flex-wrap:wrap; }
+  .meta .due.over{ color:var(--hi); font-weight:600; }
+  .chip{ padding:1px 7px; border-radius:10px; background:var(--panel); border:1px solid var(--line); }
+  .pri{ width:6px; align-self:stretch; border-radius:3px; background:var(--lo); }
+  .pri.High{ background:var(--hi) } .pri.Medium{ background:var(--med) } .pri.Low{ background:var(--lo) }
+  .score{ font-variant-numeric:tabular-nums; color:var(--accent); font-weight:700; }
+  .ip{ font-size:10px; color:#fff; background:var(--med); padding:1px 6px; border-radius:10px; }
+  #empty{ padding:36px; text-align:center; color:var(--lbl); }
+</style>
+</head>
+<body>
+<div id="bar">
+  <label>Context</label><select id="ctx"><option value="">All</option></select>
+  <label>Energy</label><select id="energy"><option value="">Any</option><option value="3">High</option><option value="2">Medium</option><option value="1">Low</option></select>
+  <label>I have</label><select id="time"><option value="">Any time</option><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="120">2 hours</option></select>
+  <span id="count"></span>
+</div>
+<div id="list"><div id="empty">Loading…</div></div>
+<script>
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+const toRows=c=>{const k=Object.keys(c),n=(c.id||[]).length,o=[];for(let i=0;i<n;i++){const r={};for(const x of k)r[x]=c[x][i];o.push(r);}return o;};
+const EN={High:3,Medium:2,Low:1};
+const today=()=>{const d=new Date();return Date.UTC(d.getFullYear(),d.getMonth(),d.getDate());};
+const dOnly=t=>{const d=new Date(t*1000);return Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());};
+let TASKS=[], PROJ={}, CTX={};
+
+grist.ready({ requiredAccess:'full' });
+grist.onRecords(()=>load());
+
+async function load(){
+  const [tasks,projects,contexts]=await Promise.all([
+    grist.docApi.fetchTable('Tasks').then(toRows),
+    grist.docApi.fetchTable('Projects').then(toRows).catch(()=>[]),
+    grist.docApi.fetchTable('Contexts').then(toRows).catch(()=>[]),
+  ]);
+  PROJ=Object.fromEntries(projects.map(p=>[p.id,p.Name]));
+  CTX=Object.fromEntries(contexts.map(c=>[c.id,c.Name]));
+  TASKS=tasks.filter(t=>t.Available).map(t=>({
+    title:t.Title, project:t.Project?PROJ[t.Project]:null, status:t.Status,
+    priority:t.Priority||"", energy:t.Energy||"", time:t.TimeEstimate?+t.TimeEstimate:null,
+    due:t.Due?dOnly(t.Due):null, score:t.Score||0,
+    ctx:Array.isArray(t.Contexts)?t.Contexts.slice(1):[],
+  })).sort((a,b)=>b.score-a.score);
+  // populate context dropdown once
+  const sel=document.getElementById('ctx');
+  if(sel.options.length<=1) for(const c of contexts) sel.add(new Option(c.Name,c.id));
+  render();
+}
+
+function render(){
+  const cv=document.getElementById('ctx').value;
+  const ev=document.getElementById('energy').value;
+  const tv=document.getElementById('time').value;
+  const rows=TASKS.filter(t=>{
+    if(cv && !(t.ctx.includes(+cv)||t.ctx.length===0)) return false;
+    if(ev && t.energy && EN[t.energy]>+ev) return false;
+    if(tv && t.time && t.time>+tv) return false;
+    return true;
+  });
+  document.getElementById('count').textContent=rows.length+" next action"+(rows.length===1?"":"s");
+  const list=document.getElementById('list');
+  if(!rows.length){ list.innerHTML='<div id="empty">Nothing available in this context. Try widening the filters — or you’re clear. \u{1f389}</div>'; return; }
+  const tdy=today();
+  list.innerHTML=rows.map((t,i)=>{
+    const meta=[];
+    if(t.project) meta.push(`<span class="chip">${esc(t.project)}</span>`);
+    for(const id of t.ctx) if(CTX[id]) meta.push(esc(CTX[id]));
+    if(t.energy) meta.push('⚡'+esc(t.energy));
+    if(t.time) meta.push('⏱'+t.time+'m');
+    if(t.due!=null){ const over=t.due<tdy, days=Math.round((t.due-tdy)/86400000);
+      meta.push(`<span class="due ${over?'over':''}">${over?'overdue':(days===0?'due today':'due '+days+'d')}</span>`); }
+    return `<div class="row"><div class="pri ${esc(t.priority)}"></div><div class="rank">${i+1}</div>
+      <div class="main"><div class="title">${esc(t.title)}${t.status==='In Progress'?' <span class="ip">in progress</span>':''}</div>
+      <div class="meta">${meta.join('<span> </span>')}</div></div>
+      <div class="score">${(+t.score).toFixed(2)}</div></div>`;
+  }).join('');
+}
+for(const id of ['ctx','energy','time']) document.getElementById(id).addEventListener('change',render);
+load();
+</script>
+</body>
+</html>
