@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GTD Gantt</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<style>
+  :root{ --bg:#fff; --fg:#222; --line:#e2e5e9; --grid:#f2f3f5; --today:#e5484d; --lbl:#666; }
+  @media (prefers-color-scheme: dark){ :root{ --bg:#1e2024; --fg:#e6e6e6; --line:#3a3f45; --grid:#2a2d31; --today:#ff6369; --lbl:#9aa0a6; } }
+  *{ box-sizing:border-box; }
+  body{ font:13px/1.4 system-ui,sans-serif; margin:0; color:var(--fg); background:var(--bg); }
+  #wrap{ overflow:auto; height:100vh; }
+  table.gantt{ border-collapse:collapse; width:max-content; min-width:100%; }
+  .gantt th,.gantt td{ border:1px solid var(--line); padding:0; }
+  .gantt thead th{ position:sticky; top:0; z-index:3; background:var(--bg); font-weight:600; color:var(--lbl);
+    font-size:11px; padding:4px 6px; text-align:center; white-space:nowrap; }
+  .namecol{ position:sticky; left:0; z-index:4; background:var(--bg); text-align:left !important;
+    padding:4px 10px !important; min-width:220px; max-width:320px; }
+  td.namecol{ z-index:2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .grp{ font-weight:700; background:var(--grid); }
+  .cell{ height:26px; position:relative; }
+  .day{ width:26px; }
+  .bar{ position:absolute; top:5px; height:16px; border-radius:4px; opacity:.92;
+    display:flex; align-items:center; padding:0 5px; color:#fff; font-size:11px; white-space:nowrap; overflow:hidden; }
+  .milestone{ position:absolute; top:6px; left:50%; width:12px; height:12px; transform:translateX(-50%) rotate(45deg); }
+  .today{ position:absolute; top:0; bottom:0; width:0; border-left:2px solid var(--today); z-index:1; }
+  #empty{ padding:16px; color:var(--lbl); }
+  .s-inbox{ background:#8b8f96 } .s-todo{ background:#3b82f6 } .s-inprogress{ background:#f59e0b }
+  .s-waiting{ background:#a855f7 } .s-someday{ background:#6b7280 } .s-done{ background:#22c55e }
+</style>
+</head>
+<body>
+<div id="wrap"><div id="empty">Loading&hellip;</div></div>
+<script>
+const DAY = 86400000;
+const statusClass = s => ({ "Inbox":"s-inbox","To Do":"s-todo","In Progress":"s-inprogress",
+  "Waiting For":"s-waiting","Someday/Maybe":"s-someday","Done":"s-done" }[s] || "s-todo");
+const esc = s => String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+const toRows = c => { const k=Object.keys(c), n=(c.id||[]).length, o=[]; for(let i=0;i<n;i++){const r={}; for(const x of k)r[x]=c[x][i]; o.push(r);} return o; };
+const dOnly = t => { const d=new Date(t*1000); return Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()); };
+const fmt = ms => { const d=new Date(ms); return (d.getUTCMonth()+1)+"/"+d.getUTCDate(); };
+
+grist.ready({ requiredAccess: 'full' });
+grist.onRecords(() => render());
+
+async function render(){
+  const [tasks, projects] = await Promise.all([
+    grist.docApi.fetchTable('Tasks').then(toRows),
+    grist.docApi.fetchTable('Projects').then(toRows).catch(()=>[]),
+  ]);
+  const projName = Object.fromEntries(projects.map(p=>[p.id, p.Name]));
+  const items = tasks.filter(t => t.Due).map(t => ({
+    title: t.Title, status: t.Status, project: t.Project ? (projName[t.Project]||"Project "+t.Project) : "— Unfiled —",
+    start: t.Defer ? dOnly(t.Defer) : null, end: dOnly(t.Due),
+  }));
+  const wrap = document.getElementById('wrap');
+  if(!items.length){ wrap.innerHTML = '<div id="empty">No tasks with a Due date to schedule.</div>'; return; }
+  let min = Math.min(...items.map(i => i.start ?? i.end));
+  let max = Math.max(...items.map(i => i.end));
+  min -= 2*DAY; max += 2*DAY;
+  const days = Math.round((max-min)/DAY)+1;
+  const todayMs = dOnly(Math.floor(Date.now()/1000));
+  const groups = {};
+  for(const it of items){ (groups[it.project] ||= []).push(it); }
+  let html = '<table class="gantt"><thead><tr><th class="namecol">Task</th>';
+  for(let d=0; d<days; d++){ const ms=min+d*DAY; const wd=new Date(ms).getUTCDay();
+    html += `<th class="day">${(wd===1||d===0)?fmt(ms):""}</th>`; }
+  html += '</tr></thead><tbody>';
+  for(const [grp, rows] of Object.entries(groups)){
+    html += `<tr><td class="namecol grp">${esc(grp)}</td><td class="grp" colspan="${days}"></td></tr>`;
+    for(const it of rows){
+      html += `<tr><td class="namecol">${esc(it.title)}</td><td class="cell" colspan="${days}"><div style="position:relative;height:100%">`;
+      const s = it.start ?? it.end;
+      const x0 = Math.round((s-min)/DAY)*26;
+      const w = Math.max(1, Math.round((it.end - s)/DAY)+1)*26;
+      if(it.start && it.end>it.start){
+        html += `<div class="bar ${statusClass(it.status)}" style="left:${x0}px;width:${w}px">${esc(it.title)}</div>`;
+      } else {
+        const mx = Math.round((it.end-min)/DAY)*26 + 13;
+        html += `<div class="milestone ${statusClass(it.status)}" style="left:${mx}px"></div>`;
+      }
+      const tx = Math.round((todayMs-min)/DAY)*26 + 13;
+      if(todayMs>=min && todayMs<=max) html += `<div class="today" style="left:${tx}px"></div>`;
+      html += '</div></td></tr>';
+    }
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+render();
+</script>
+</body>
+</html>
