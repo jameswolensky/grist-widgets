@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GTD Kanban</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<style>
+  body { font: 13px/1.4 system-ui, sans-serif; margin: 0; padding: 8px; color: #222; }
+  #board { display: flex; gap: 10px; align-items: flex-start; overflow-x: auto; }
+  .lane { background: #f2f3f5; border-radius: 8px; min-width: 180px; padding: 8px; flex: 0 0 auto; }
+  .lane h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; color: #555; letter-spacing: .03em; }
+  .card { background: #fff; border: 1px solid #dcdfe3; border-radius: 6px; padding: 6px 8px;
+          margin-bottom: 6px; cursor: grab; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .card.drag { opacity: .5; }
+  .lane.over { outline: 2px dashed #7aa7ff; }
+  .meta { color: #888; font-size: 11px; margin-top: 2px; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #ddd; }
+    .lane { background: #2a2d31; }
+    .lane h3 { color: #aaa; }
+    .card { background: #35393e; border-color: #4a4f55; }
+  }
+</style>
+</head>
+<body>
+<div id="board"></div>
+<script>
+const LANES = ["Inbox","Next Action","In Progress","Waiting For","Someday/Maybe","Done"];
+let dragId = null;
+
+grist.ready({ requiredAccess: 'full' });
+grist.onRecords(render);
+
+function render(records) {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  for (const lane of LANES) {
+    const el = document.createElement('div');
+    el.className = 'lane'; el.dataset.lane = lane;
+    el.innerHTML = '<h3>' + lane + '</h3>';
+    el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('over'); });
+    el.addEventListener('dragleave', () => el.classList.remove('over'));
+    el.addEventListener('drop', e => {
+      e.preventDefault(); el.classList.remove('over');
+      if (dragId != null) moveCard(dragId, lane);
+    });
+    for (const r of records.filter(x => (x.Status || 'Inbox') === lane)) {
+      const c = document.createElement('div');
+      c.className = 'card'; c.draggable = true;
+      c.innerHTML = '<div>' + escapeHtml(r.Title || '(untitled)') + '</div>' +
+        '<div class="meta">' + escapeHtml(r.Priority || '') +
+        (r.Score != null ? ' \u00b7 ' + (+r.Score).toFixed(2) : '') + '</div>';
+      c.addEventListener('dragstart', () => { dragId = r.id; c.classList.add('drag'); });
+      c.addEventListener('dragend',   () => { dragId = null; c.classList.remove('drag'); });
+      el.appendChild(c);
+    }
+    board.appendChild(el);
+  }
+}
+
+async function moveCard(id, status) {
+  await grist.selectedTable.update({ id, fields: { Status: status } });
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, m => (
+  {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+</script>
+</body>
+</html>
