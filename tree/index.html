@@ -19,12 +19,13 @@
   }
   *{ box-sizing:border-box; }
   html,body{ margin:0; height:100%; font:13px/1.4 system-ui,sans-serif; color:var(--fg); background:var(--bg); overflow:hidden; }
-  #bar{ position:fixed; top:0; left:0; right:0; height:38px; z-index:20; display:flex; align-items:center; gap:8px;
+  #app{ height:100vh; min-height:520px; display:flex; flex-direction:column; }
+  #bar{ flex:0 0 38px; z-index:20; display:flex; align-items:center; gap:8px;
     padding:0 10px; background:var(--panel); border-bottom:1px solid var(--line); }
   #bar button{ font:inherit; padding:3px 8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px; cursor:pointer; }
   #crumb{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--lbl); }
   #crumb b{ color:var(--fg); }
-  #viewport{ position:fixed; top:38px; left:0; right:0; bottom:0; overflow:hidden; cursor:grab; }
+  #viewport{ flex:1 1 auto; min-height:0; position:relative; overflow:hidden; cursor:grab; }
   #viewport.drag{ cursor:grabbing; }
   #pan{ position:absolute; transform-origin:0 0; }
   #bands{ position:absolute; left:0; top:0; z-index:0; }
@@ -62,6 +63,7 @@
 </style>
 </head>
 <body>
+<div id="app">
 <div id="bar">
   <button id="fit">Fit</button><button id="zin">＋</button><button id="zout">－</button>
   <button id="expand">Expand all</button><button id="collapse">Collapse tasks</button>
@@ -74,6 +76,7 @@
   <svg id="edges"></svg>
   <div id="nodes"></div>
 </div></div>
+</div>
 <div id="empty">Loading…</div>
 <script>
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
