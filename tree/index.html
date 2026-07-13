@@ -225,8 +225,14 @@ vp.addEventListener('wheel',e=>{ e.preventDefault(); const r=vp.getBoundingClien
   const d=e.deltaY<0?1.1:1/1.1, ns=Math.min(2.5,Math.max(0.12,scale*d));
   tx=mx-(mx-tx)*(ns/scale); ty=my-(my-ty)*(ns/scale); scale=ns; apply(); },{passive:false});
 function fit(){ const vr=vp.getBoundingClientRect(); if(!CW||!CH)return;
-  scale=Math.min(1.4, Math.min((vr.width-40)/CW,(vr.height-40)/CH)); if(!isFinite(scale)||scale<=0)scale=1;
-  tx=Math.max(20,(vr.width-CW*scale)/2); ty=20; apply(); }
+  const sW=(vr.width-24)/CW, sH=(vr.height-24)/CH;
+  // fill the available space: scale to the larger axis, center; pan the overflowing axis
+  scale=Math.min(2.4, Math.max(0.10, Math.max(sW,sH))); if(!isFinite(scale)||scale<=0)scale=1;
+  const w=CW*scale, h=CH*scale;
+  tx = w<=vr.width ? (vr.width-w)/2 : 14;
+  ty = h<=vr.height ? (vr.height-h)/2 : 14;
+  apply(); }
+window.addEventListener('resize',()=>{ clearTimeout(window.__rf); window.__rf=setTimeout(fit,120); });
 
 document.getElementById('fit').onclick=fit;
 document.getElementById('zin').onclick=()=>{ scale=Math.min(2.5,scale*1.15); apply(); };
