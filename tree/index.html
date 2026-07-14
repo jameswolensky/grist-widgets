@@ -60,6 +60,23 @@
   .st-inbox{background:#8b8f96}.st-todo{background:#3b82f6}.st-inprogress{background:#f59e0b}
   .st-waiting{background:#a855f7}.st-someday{background:#6b7280}.st-done{background:#22c55e}
   #empty{ position:fixed; top:60px; left:20px; color:var(--lbl); }
+  .menu{ position:fixed; z-index:50; background:var(--bg); border:1px solid var(--line); border-radius:8px;
+    box-shadow:0 6px 24px rgba(0,0,0,.4); padding:4px; min-width:200px; font-size:13px; }
+  .menu .mhead{ padding:5px 10px 7px; color:var(--lbl); font-size:11px; border-bottom:1px solid var(--line); margin-bottom:4px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:240px; }
+  .menu button{ display:block; width:100%; text-align:left; background:none; border:0; color:var(--fg); padding:7px 10px; border-radius:6px; cursor:pointer; font:inherit; }
+  .menu button:hover{ background:var(--panel); }
+  .menu button:disabled{ color:var(--lbl); opacity:.45; cursor:default; }
+  .menu button:disabled:hover{ background:none; }
+  .menu button .t{ color:var(--lbl); font-size:11px; }
+  .modal{ position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; }
+  .modal .box{ background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:16px; width:340px; box-shadow:0 12px 44px rgba(0,0,0,.45); }
+  .modal .mt{ font-weight:600; margin-bottom:10px; }
+  .modal input{ width:100%; padding:8px 9px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--fg); font:inherit; }
+  .modal .row{ display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+  .modal .row button{ font:inherit; padding:6px 13px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); cursor:pointer; }
+  .modal .row button.pri{ background:var(--k-goal); border-color:var(--k-goal); color:#fff; }
+  [hidden]{ display:none !important; }
 </style>
 </head>
 <body>
@@ -78,6 +95,12 @@
 </div></div>
 </div>
 <div id="empty">Loading…</div>
+<div id="ctxmenu" class="menu" hidden></div>
+<div id="promptModal" class="modal" hidden><div class="box">
+  <div class="mt" id="promptTitle"></div>
+  <input id="promptInput" placeholder="Name" autocomplete="off">
+  <div class="row"><button id="promptCancel">Cancel</button><button id="promptOk" class="pri">Add</button></div>
+</div></div>
 <script>
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 const toRows=c=>{const k=Object.keys(c),n=(c.id||[]).length,o=[];for(let i=0;i<n;i++){const r={};for(const x of k)r[x]=c[x][i];o.push(r);}return o;};
@@ -87,7 +110,7 @@ const TIER={ Value:0, Vision:1, Goal:2, Project:3, Task:4 };
 const BANDS=[["Values",0],["Vision",1],["Goals",2],["Projects",3],["Actions",4]];
 const NODE_W=132, NODE_H=56, GX=22, BAND_H=176, SUB_H=82, GUTTER=94, ROOT_GAP=1;
 
-let ROOTS=[], collapsed=new Set(), uid=0;
+let ROOTS=[], collapsed=new Set(), uid=0, TBL={}, pending=null;
 
 grist.ready({ requiredAccess:'full' });
 grist.onRecords(()=>load());
@@ -99,6 +122,7 @@ async function load(){
       ['Values','Vision','Goals','Areas','Projects','Tasks'].map(t=>grist.docApi.fetchTable(t).then(toRows)));
   }catch(e){ document.getElementById('empty').textContent='Could not read tables: '+(e.message||e); return; }
   document.getElementById('empty').style.display='none';
+  TBL={values,vision,goals,areas,projects,tasks};
 
   const areaName=id=>(areas.find(a=>a.id===id)||{}).Name||null;
   const N=(label,kind,extra)=>({uid:++uid,label,kind,children:[],parent:null,...extra});
@@ -106,16 +130,17 @@ async function load(){
 
   const childTasksOf={}, rootTasksByProject={};
   for(const t of tasks){ if(t.Parent)(childTasksOf[t.Parent] ||= []).push(t); else (rootTasksByProject[t.Project||0] ||= []).push(t); }
-  const buildTask=t=>{ const n=N(t.Title,"Task",{status:t.Status,dbid:t.id});
+  const buildTask=t=>{ const n=N(t.Title,"Task",{status:t.Status,dbid:t.id,projectId:t.Project||0,parentTaskId:t.Parent||0});
     (childTasksOf[t.id]||[]).sort((a,b)=>(a.Title||'').localeCompare(b.Title||'')).forEach(c=>link(n,buildTask(c))); return n; };
   const projByGoal={}; for(const p of projects)(projByGoal[p.Goal||0] ||= []).push(p);
-  const buildProject=p=>{ const n=N(p.Name,"Project",{badge:p.Area?areaName(p.Area):null,dbid:p.id});
+  const buildProject=p=>{ const n=N(p.Name,"Project",{badge:p.Area?areaName(p.Area):null,dbid:p.id,goalId:p.Goal||0});
     (rootTasksByProject[p.id]||[]).sort((a,b)=>(a.Title||'').localeCompare(b.Title||'')).forEach(t=>link(n,buildTask(t))); return n; };
-  const buildGoal=g=>{ const n=N(g.Name,"Goal",{dbid:g.id}); (projByGoal[g.id]||[]).forEach(p=>link(n,buildProject(p))); return n; };
+  const buildGoal=g=>{ const vaId=g.Value||(g.Vision?((vision.find(x=>x.id===g.Vision)||{}).Value||0):0);
+    const n=N(g.Name,"Goal",{dbid:g.id,visionId:g.Vision||0,valueId:vaId}); (projByGoal[g.id]||[]).forEach(p=>link(n,buildProject(p))); return n; };
   const goalsByVision={}, goalsByValue={};
   for(const g of goals){ if(g.Vision)(goalsByVision[g.Vision] ||= []).push(g); else (goalsByValue[g.Value||0] ||= []).push(g); }
   const visionByValue={}; for(const v of vision)(visionByValue[v.Value||0] ||= []).push(v);
-  const buildVision=v=>{ const n=N(v.Name,"Vision",{dbid:v.id}); (goalsByVision[v.id]||[]).forEach(g=>link(n,buildGoal(g))); return n; };
+  const buildVision=v=>{ const n=N(v.Name,"Vision",{dbid:v.id,valueId:v.Value||0}); (goalsByVision[v.id]||[]).forEach(g=>link(n,buildGoal(g))); return n; };
   const PH=(kind,label)=>N(label,kind,{ph:true});
   const buildValue=val=>{ const n=N(val.Name,"Value",{dbid:val.id});
     (visionByValue[val.id]||[]).forEach(v=>link(n,buildVision(v)));
@@ -186,12 +211,15 @@ function render(){
     if(n.badge) sub+=`<span class="chip area">${esc(n.badge)}</span>`;
     const hasKids=n.children.length>0;
     const caret=hasKids?`<span class="caret" data-uid="${n.uid}">${collapsed.has(n.uid)?'+':'–'}</span>`:'';
-    nh+=`<div class="node k-${n.kind.toLowerCase()}${n.ph?' ph':''}" data-uid="${n.uid}" style="left:${n.x}px;top:${n.y}px;width:${NODE_W}px">
+    nh+=`<div class="node k-${n.kind.toLowerCase()}${n.ph?' ph':''}" data-uid="${n.uid}" data-dbid="${n.dbid||''}" data-kind="${n.kind}" style="left:${n.x}px;top:${n.y}px;width:${NODE_W}px">
       ${caret}<span class="kind">${esc(n.kind)}</span>
       <span class="label">${esc(n.label)}</span>${sub?`<span class="sub">${sub}</span>`:''}</div>`;
   }
   nodes.innerHTML=nh; nodes.style.width=CW+'px'; nodes.style.height=CH+'px';
   fit();
+  if(pending){ const el=document.querySelector(`.node[data-kind="${pending.kind}"][data-dbid="${pending.id}"]`);
+    if(el){ const u=+el.dataset.uid; centerOn(byUid(u)); trace(u); }
+    pending=null; }
 }
 
 // interactions (event delegation)
@@ -201,6 +229,76 @@ document.getElementById('nodes').addEventListener('click',e=>{
   const nd=e.target.closest('.node'); if(nd) trace(+nd.dataset.uid);
 });
 const byUid=u=>{ let f=null; (function w(n){ if(n.uid===u)f=n; n.children&&n.children.forEach(w); })({children:ROOTS,uid:-1}); return f; };
+
+/* ---- right-click: add nodes (hierarchy insert) ---- */
+const KINDOF={Values:'Value',Vision:'Vision',Goals:'Goal',Projects:'Project',Tasks:'Task'};
+const CHILDK={Value:'Vision',Vision:'Goal',Goal:'Project',Project:'Task',Task:'Task'};
+const ABOVEK={Vision:'Value',Goal:'Vision',Project:'Goal'};
+const menuEl=document.getElementById('ctxmenu');
+function aboveKind(node){ if(node.kind==='Value')return null; if(node.kind==='Task')return node.parentTaskId?'Task':'Project'; return ABOVEK[node.kind]; }
+document.getElementById('nodes').addEventListener('contextmenu',e=>{
+  const nd=e.target.closest('.node'); if(!nd)return; e.preventDefault();
+  const node=byUid(+nd.dataset.uid); if(!node||node.ph){ menuEl.hidden=true; return; }
+  const below=CHILDK[node.kind], above=aboveKind(node), next=node.kind;
+  const item=(w,k,l)=> k?`<button data-w="${w}">${l} <span class="t">→ ${k}</span></button>`:`<button disabled>${l} <span class="t">n/a</span></button>`;
+  menuEl.innerHTML=`<div class="mhead">${esc(node.kind)}: ${esc(node.label)}</div>`
+    +item('above',above,'Add Above')+item('below',below,'Add Below')+item('next',next,'Add Next To');
+  menuEl.hidden=false;
+  menuEl.style.left=Math.min(e.clientX, innerWidth-220)+'px';
+  menuEl.style.top=Math.min(e.clientY, innerHeight-160)+'px';
+  menuEl.querySelectorAll('button[data-w]').forEach(b=> b.onclick=ev=>{ ev.stopPropagation(); menuEl.hidden=true; startAdd(node,b.dataset.w); });
+});
+window.addEventListener('click',()=>{ menuEl.hidden=true; });
+
+function askName(title,def){ return new Promise(res=>{
+  const m=document.getElementById('promptModal'),t=document.getElementById('promptTitle'),inp=document.getElementById('promptInput'),
+        ok=document.getElementById('promptOk'),cx=document.getElementById('promptCancel');
+  t.textContent=title; inp.value=def; m.hidden=false; setTimeout(()=>{inp.focus();inp.select();},0);
+  const done=v=>{ m.hidden=true; ok.onclick=cx.onclick=inp.onkeydown=null; res(v); };
+  ok.onclick=()=>done(inp.value); cx.onclick=()=>done(null);
+  inp.onkeydown=ev=>{ if(ev.key==='Enter')done(inp.value); else if(ev.key==='Escape')done(null); };
+});}
+
+async function startAdd(node,where){
+  const kind = where==='below'?CHILDK[node.kind] : where==='next'?node.kind : aboveKind(node);
+  const label = where==='above'?'Add Above':where==='below'?'Add Below':'Add Next To';
+  const name = await askName(`${label} — new ${kind}`, `New ${kind}`);
+  if(name==null) return;
+  await doAdd(node, where, (name.trim()||('New '+kind)));
+}
+
+async function doAdd(node, where, name){
+  let addTable, fields, upd=null;
+  if(where==='below'){
+    if(node.kind==='Value'){ addTable='Vision'; fields={Name:name, Value:node.dbid}; }
+    else if(node.kind==='Vision'){ addTable='Goals'; fields={Name:name, Vision:node.dbid, Status:'Active'}; }
+    else if(node.kind==='Goal'){ addTable='Projects'; fields={Name:name, Goal:node.dbid, Status:'Active'}; }
+    else if(node.kind==='Project'){ addTable='Tasks'; fields={Title:name, Project:node.dbid, Status:'To Do'}; }
+    else { addTable='Tasks'; fields={Title:name, Parent:node.dbid, Project:node.projectId, Status:'To Do'}; }
+  } else if(where==='next'){
+    if(node.kind==='Value'){ addTable='Values'; fields={Name:name}; }
+    else if(node.kind==='Vision'){ addTable='Vision'; fields={Name:name, Value:node.valueId}; }
+    else if(node.kind==='Goal'){ addTable='Goals'; fields=node.visionId?{Name:name,Vision:node.visionId,Status:'Active'}:{Name:name,Value:node.valueId,Status:'Active'}; }
+    else if(node.kind==='Project'){ addTable='Projects'; fields={Name:name, Goal:node.goalId, Status:'Active'}; }
+    else { addTable='Tasks'; fields={Title:name, Project:node.projectId, Parent:node.parentTaskId||0, Status:'To Do'}; }
+  } else { // above: create parent, reparent this node under it
+    if(node.kind==='Vision'){ addTable='Values'; fields={Name:name}; upd={table:'Vision', id:node.dbid, mk:v=>({Value:v})}; }
+    else if(node.kind==='Goal'){ addTable='Vision'; fields={Name:name, Value:node.valueId}; upd={table:'Goals', id:node.dbid, mk:v=>({Vision:v, Value:0})}; }
+    else if(node.kind==='Project'){ const g=(TBL.goals||[]).find(x=>x.id===node.goalId)||{}; addTable='Goals'; fields={Name:name, Vision:g.Vision||0, Value:g.Value||0, Status:'Active'}; upd={table:'Projects', id:node.dbid, mk:v=>({Goal:v})}; }
+    else if(node.kind==='Task'){
+      if(node.parentTaskId){ addTable='Tasks'; fields={Title:name, Parent:node.parentTaskId, Project:node.projectId, Status:'To Do'}; upd={table:'Tasks', id:node.dbid, mk:v=>({Parent:v})}; }
+      else { const p=(TBL.projects||[]).find(x=>x.id===node.projectId)||{}; addTable='Projects'; fields={Name:name, Goal:p.Goal||0, Status:'Active'}; upd={table:'Tasks', id:node.dbid, mk:v=>({Project:v})}; }
+    } else return;
+  }
+  try{
+    const r=await grist.docApi.applyUserActions([['AddRecord', addTable, null, fields]]);
+    const newId=r.retValues[0];
+    if(upd) await grist.docApi.applyUserActions([['UpdateRecord', upd.table, upd.id, upd.mk(newId)]]);
+    pending={kind:KINDOF[addTable], id:newId};
+    await load();
+  }catch(err){ document.getElementById('crumb').textContent='Add failed: '+(err.message||err); }
+}
+function centerOn(node){ const vr=vp.getBoundingClientRect(); tx=vr.width/2-(node.x+NODE_W/2)*scale; ty=vr.height/2-(node.y+NODE_H/2)*scale; apply(); }
 function trace(u){
   const node=byUid(u); if(!node) return;
   document.querySelectorAll('.node.onpath').forEach(e=>e.classList.remove('onpath'));
